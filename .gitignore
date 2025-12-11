@@ -1,0 +1,44 @@
+# Environment files
+.env
+*.env
+config/*.env
+
+# Database files
+*.duckdb
+*.db
+data/processed/*.duckdb
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# dbt
+dbt_project/target/
+dbt_project/dbt_packages/
+dbt_project/logs/
+
+# Dagster
+dagster_project/tmp/
+dagster_project/storage/
+
+# Data files
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Environment
+.env
+
+# Docker
+.dockerignore

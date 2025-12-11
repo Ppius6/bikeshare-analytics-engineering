@@ -1,0 +1,102 @@
+version: 2
+
+models:
+  - name: fct_rides
+    description: >
+      Fact table containing one row per bike share ride.
+      This is the central table for ride-level analysis.
+    columns:
+      - name: ride_id
+        description: Primary key - unique identifier for each ride
+        tests:
+          - unique
+          - not_null
+      
+      - name: ride_duration_minutes
+        description: Total duration of the ride in minutes
+        tests:
+          - not_null
+      
+      - name: distance_km
+        description: Approximate distance traveled in kilometers
+
+  - name: dim_stations
+    description: >
+      Dimension table with one row per station.
+      Contains station attributes and aggregated ride metrics.
+    columns:
+      - name: station_id
+        description: Primary key - unique station identifier
+        tests:
+          - unique
+          - not_null
+      
+      - name: station_name
+        description: Name of the bike share station
+        tests:
+          - not_null
+      
+      - name: total_rides
+        description: Total number of rides that started or ended at this station
+      
+      - name: member_rides_started
+        description: Number of rides started by members at this station
+      
+      - name: casual_rides_started
+        description: Number of rides started by casual users at this station
+      
+      - name: avg_ride_duration_minutes
+        description: Average duration of rides starting from this station
+      
+      - name: days_active
+        description: Number of days between first and last ride at this station
+
+  - name: agg_daily_rides
+    description: >
+      Daily aggregated ride metrics.
+      One row per date with summary statistics.
+    columns:
+      - name: ride_date
+        description: Primary key - the date of rides
+        tests:
+          - unique
+          - not_null
+      
+      - name: total_rides
+        description: Total number of rides on this date
+        tests:
+          - not_null
+      
+      - name: member_rides
+        description: Number of member rides on this date
+      
+      - name: casual_rides
+        description: Number of casual rides on this date
+      
+      - name: avg_ride_duration
+        description: Average ride duration in minutes for this date
+
+  - name: agg_hourly_patterns
+    description: >
+      Hourly usage patterns aggregated by hour and weekend/weekday.
+      Used for analyzing peak usage times and behavioral patterns.
+    columns:
+      - name: ride_hour
+        description: Hour of day (0-23)
+        tests:
+          - not_null
+      
+      - name: is_weekend
+        description: Whether this is a weekend day (Saturday/Sunday)
+      
+      - name: total_rides
+        description: Total rides in this hour bucket
+      
+      - name: member_rides
+        description: Member rides in this hour bucket
+      
+      - name: casual_rides
+        description: Casual rides in this hour bucket
+      
+      - name: avg_ride_duration
+        description: Average ride duration for this hour bucket

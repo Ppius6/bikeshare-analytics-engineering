@@ -1,0 +1,25 @@
+# dbt
+dbt-core>=1.7.0
+dbt-postgres>=1.7.0
+dbt-clickhouse>=1.7.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Database clients
+psycopg2-binary>=2.9.0
+clickhouse-driver>=0.2.6
+clickhouse-connect>=0.6.0
+sqlalchemy>=2.0.0
+
+# Web scraping
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# Utilities
+python-dotenv>=1.0.0
+pyyaml>=6.0
+pytz>=2023.3
+tqdm>=4.66.0

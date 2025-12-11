@@ -1,0 +1,67 @@
+version: 2
+
+models:
+  - name: stg_rides
+    description: >
+      Cleaned and enriched bike share ride data from the raw source.
+      Calculates ride duration, distance, and extracts date components.
+    columns:
+      - name: ride_id
+        description: Unique identifier for each ride
+        tests:
+          - not_null
+      
+      - name: rideable_type
+        description: Type of bike used (electric_bike or classic_bike)
+        tests:
+          - not_null
+      
+      - name: started_at
+        description: Timestamp when the ride started
+        tests:
+          - not_null
+      
+      - name: ended_at
+        description: Timestamp when the ride ended
+        tests:
+          - not_null
+      
+      - name: ride_duration_minutes
+        description: Duration of the ride in minutes (ended_at - started_at)
+      
+      - name: ride_date
+        description: Date of the ride (extracted from started_at)
+      
+      - name: distance_km
+        description: >
+          Approximate distance traveled in kilometers, calculated using 
+          the haversine formula between start and end coordinates
+      
+      - name: member_casual
+        description: User type - either 'member' (subscriber) or 'casual' (single-use)
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['member', 'casual']
+
+  - name: stg_stations
+    description: >
+      Deduplicated list of all bike share stations. 
+      Combines start and end stations from rides, handling name variations.
+    columns:
+      - name: station_id
+        description: Unique identifier for the station
+        tests:
+          - unique
+          - not_null
+      
+      - name: station_name
+        description: Display name of the station (may have slight variations in source data)
+        tests:
+          - not_null
+      
+      - name: latitude
+        description: Average latitude coordinate of the station
+      
+      - name: longitude
+        description: Average longitude coordinate of the station

@@ -1,0 +1,28 @@
+version: 2
+
+sources:
+  - name: bikeshare
+    description: Raw bikeshare data from ClickHouse
+    database: bikeshare
+    schema: bikeshare
+    tables:
+      - name: raw_rides
+        description: Raw ride data from CSV files
+        columns:
+          - name: ride_id
+            description: Unique identifier for each ride
+            tests:
+              - not_null
+          - name: started_at
+            description: Ride start timestamp
+            tests:
+              - not_null
+          - name: ended_at
+            description: Ride end timestamp
+            tests:
+              - not_null
+          - name: member_casual
+            description: Member type (member or casual)
+            tests:
+              - accepted_values:
+                  values: ['member', 'casual']
