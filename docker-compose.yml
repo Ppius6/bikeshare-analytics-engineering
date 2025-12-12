@@ -71,17 +71,27 @@ services:
       - DEV_POSTGRES_DB=${DEV_POSTGRES_DB}
       - DEV_POSTGRES_USER=${DEV_POSTGRES_USER}
       - DEV_POSTGRES_PASSWORD=${DEV_POSTGRES_PASSWORD}
-      - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_PORT=8123
+
+      # Clickhouse Local Connection
+      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST:-clickhouse}
+      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT:-8123}
       - CLICKHOUSE_DB=${CLICKHOUSE_DB:-bikeshare}
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse}
+      - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE:-false}
+
+      # Clickhouse Cloud Connection
+      - CLICKHOUSE_CLOUD_HOST=${CLICKHOUSE_CLOUD_HOST}  
+      - CLICKHOUSE_CLOUD_NATIVE_PORT=${CLICKHOUSE_CLOUD_NATIVE_PORT} 
+      - CLICKHOUSE_CLOUD_USER=${CLICKHOUSE_CLOUD_USER} 
+      - CLICKHOUSE_CLOUD_PASSWORD=${CLICKHOUSE_CLOUD_PASSWORD}
+      
       - DBT_PROFILES_DIR=/usr/app/dbt_project
     depends_on:
       postgres-dev:
         condition: service_healthy
     ports:
-      - "8080:8080"  
+      - "8080:8080"
     networks:
       - bikeshare-network
     command: ["tail", "-f", "/dev/null"]

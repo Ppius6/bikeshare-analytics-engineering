@@ -8,6 +8,19 @@ bikeshare:
       port: "{{ env_var('CLICKHOUSE_PORT', '9000') | int }}"
       user: "{{ env_var('CLICKHOUSE_USER', 'default') }}"
       password: "{{ env_var('CLICKHOUSE_PASSWORD', 'clickhouse') }}"
-      secure: false
+      secure: "{{ true if env_var('CLICKHOUSE_SECURE', 'false') == 'true' else false }}"
       verify: false
       threads: 4
+
+    cloud:
+      type: clickhouse
+      schema: bikeshare
+      host: "{{ env_var('CLICKHOUSE_CLOUD_HOST') }}"
+      port: "{{ env_var('CLICKHOUSE_CLOUD_NATIVE_PORT', '9440') | int }}"
+      user: "{{ env_var('CLICKHOUSE_CLOUD_USER', 'default') }}"
+      password: "{{ env_var('CLICKHOUSE_CLOUD_PASSWORD') }}"
+      secure: true
+      verify: true
+      threads: 4
+      custom_settings:
+        max_execution_time: 300

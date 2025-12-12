@@ -9,7 +9,8 @@ WITH start_stations AS (
         start_station_id AS station_id,
         start_station_name AS station_name,
         start_lat AS latitude,
-        start_lng AS longitude
+        start_lng AS longitude,
+        loaded_at
     FROM {{ source('bikeshare', 'raw_rides') }}
     WHERE start_station_id IS NOT NULL
       AND start_station_name IS NOT NULL
@@ -20,7 +21,8 @@ end_stations AS (
         end_station_id AS station_id,
         end_station_name AS station_name,
         end_lat AS latitude,
-        end_lng AS longitude
+        end_lng AS longitude,
+        loaded_at
     FROM {{ source('bikeshare', 'raw_rides') }}
     WHERE end_station_id IS NOT NULL
       AND end_station_name IS NOT NULL
@@ -34,7 +36,7 @@ all_stations AS (
 
 SELECT
     station_id,
-    any(station_name) AS station_name,
+    argMax(station_name, loaded_at) AS station_name,
     avg(latitude) AS latitude,
     avg(longitude) AS longitude
 FROM all_stations

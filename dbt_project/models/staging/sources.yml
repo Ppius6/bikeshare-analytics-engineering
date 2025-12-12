@@ -3,8 +3,8 @@ version: 2
 sources:
   - name: bikeshare
     description: Raw bikeshare data from ClickHouse
-    database: bikeshare
-    schema: bikeshare
+    database: "{{ env_var('CLICKHOUSE_DB', 'bikeshare') }}"
+    schema: "{{ env_var('CLICKHOUSE_DB', 'bikeshare') }}"
     tables:
       - name: raw_rides
         description: Raw ride data from CSV files

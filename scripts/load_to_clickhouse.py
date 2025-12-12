@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Load bike share CSV data into ClickHouse.
-Usage: python load_to_clickhouse.py --file data.csv
-       python load_to_clickhouse.py --dir ./data/raw
-       python load_to_clickhouse.py --download --limit 5
+Usage: python load_to_clickhouse.py --file data.csv --target cloud
+       python load_to_clickhouse.py --dir ./data/raw --target dev
+       python load_to_clickhouse.py --download --limit 5 --target cloud
 """
 
 import argparse
@@ -13,6 +13,7 @@ import sys
 import time
 from functools import wraps
 from pathlib import Path
+from typing import Optional
 
 import clickhouse_connect
 import pandas as pd
@@ -62,30 +63,87 @@ def retry(max_attempts=3, delay=5):
 def check_file_already_loaded(client, filename):
     """Check if file was already loaded."""
     try:
+        # Create table if not exists to avoid error on first run
+        client.command(
+            """
+            CREATE TABLE IF NOT EXISTS raw_rides (
+                ride_id String,
+                rideable_type String,
+                started_at DateTime,
+                ended_at DateTime,
+                start_station_name String,
+                start_station_id String,
+                end_station_name String,
+                end_station_id String,
+                start_lat Float64,
+                start_lng Float64,
+                end_lat Float64,
+                end_lng Float64,
+                member_casual String,
+                source_file String,
+                loaded_at DateTime
+            ) ENGINE = MergeTree()
+            ORDER BY (started_at, ride_id)
+        """
+        )
+
         result = client.query(
             f"SELECT count(*) FROM raw_rides WHERE source_file = '{filename}'"
         ).result_rows
         return result[0][0] > 0
-    except:
-        # Column might not exist in older schemas
+    except Exception as e:
+        logger.warning(f"Could not check if file loaded (table might be empty): {e}")
         return False
 
 
 @retry(max_attempts=3, delay=5)
-def get_clickhouse_client():
-    """Create ClickHouse client connection."""
+def get_clickhouse_client(target: str = "dev"):
+    """
+    Create ClickHouse client connection based on target.
+    target: 'dev' (Local) or 'cloud' (ClickHouse Cloud)
+    """
     try:
+        if target == "cloud":
+            host = os.getenv("CLICKHOUSE_CLOUD_HOST")
+            # Prefer HTTP port for Python client, fallback to standard 8443
+            port = int(os.getenv("CLICKHOUSE_CLOUD_HTTP_PORT", "8443"))
+            user = os.getenv("CLICKHOUSE_CLOUD_USER", "default")
+            password = os.getenv("CLICKHOUSE_CLOUD_PASSWORD")
+            database = os.getenv("CLICKHOUSE_CLOUD_DB", "default")
+            secure = True
+            label = "ClickHouse Cloud ☁️"
+        else:
+            host = os.getenv("CLICKHOUSE_HOST", "localhost")
+            # Check for specific HTTP port first, then generic PORT
+            port = int(
+                os.getenv("CLICKHOUSE_HTTP_PORT", os.getenv("CLICKHOUSE_PORT", "8123"))
+            )
+            user = os.getenv("CLICKHOUSE_USER", "default")
+            password = os.getenv("CLICKHOUSE_PASSWORD", "clickhouse")
+            database = os.getenv("CLICKHOUSE_DB", "bikeshare")
+            secure = os.getenv("CLICKHOUSE_SECURE", "false").lower() == "true"
+            label = "ClickHouse Local 🏠"
+
+        if not host:
+            raise ValueError(
+                f"Host not found for target '{target}'. Check .env variables."
+            )
+
         client = clickhouse_connect.get_client(
-            host=os.getenv("CLICKHOUSE_HOST", "localhost"),
-            port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
-            username=os.getenv("CLICKHOUSE_USER", "default"),
-            password=os.getenv("CLICKHOUSE_PASSWORD", "clickhouse"),
-            database=os.getenv("CLICKHOUSE_DB", "bikeshare"),
+            host=host,
+            port=port,
+            username=user,
+            password=password,
+            database=database,
+            secure=secure,
+            send_receive_timeout=300,  # Extended timeout for cloud operations
         )
-        logger.info("Successfully connected to ClickHouse")
+
+        masked_host = host[:15] + "..." if len(host) > 15 else host
+        logger.info(f"Successfully connected to {label} at {masked_host}:{port}")
         return client
     except Exception as e:
-        logger.error(f"Failed to connect to ClickHouse: {e}")
+        logger.error(f"Failed to connect to ClickHouse ({target}): {e}")
         raise
 
 
@@ -95,55 +153,43 @@ def validate_loaded_data(client):
     logger.info("DATA VALIDATION REPORT")
     logger.info("=" * 60)
 
-    # Total records
-    total = client.query("SELECT count(*) FROM raw_rides").result_rows[0][0]
-    logger.info(f"📊 Total records: {total:,}")
-
-    # Date range
-    date_range = client.query(
-        """
-        SELECT min(started_at), max(started_at) 
-        FROM raw_rides
-    """
-    ).result_rows[0]
-    logger.info(f"📅 Date range: {date_range[0]} to {date_range[1]}")
-
-    # Null checks
-    nulls = client.query(
-        """
-        SELECT 
-            countIf(ride_id IS NULL) as null_ride_id,
-            countIf(started_at IS NULL) as null_started_at,
-            countIf(ended_at IS NULL) as null_ended_at,
-            countIf(start_station_id IS NULL) as null_start_station,
-            countIf(end_station_id IS NULL) as null_end_station
-        FROM raw_rides
-    """
-    ).result_rows[0]
-
-    logger.info(f"\n🔍 Data Quality Checks:")
-    logger.info(f"  Null ride_id: {nulls[0]:,}")
-    logger.info(f"  Null started_at: {nulls[1]:,}")
-    logger.info(f"  Null ended_at: {nulls[2]:,}")
-    logger.info(f"  Null start_station: {nulls[3]:,}")
-    logger.info(f"  Null end_station: {nulls[4]:,}")
-
-    # User type breakdown
-    user_types = client.query(
-        """
-        SELECT member_casual, count(*) as cnt
-        FROM raw_rides
-        GROUP BY member_casual
-        ORDER BY cnt DESC
-    """
-    ).result_rows
-
-    logger.info(f"\n👥 User Type Breakdown:")
-    for user_type, cnt in user_types:
-        logger.info(f"  {user_type}: {cnt:,}")
-
-    # Files loaded
     try:
+        # Total records
+        total = client.query("SELECT count(*) FROM raw_rides").result_rows[0][0]
+        logger.info(f"📊 Total records: {total:,}")
+
+        if total == 0:
+            logger.info("⚠️  Table is empty.")
+            return
+
+        # Date range
+        date_range = client.query(
+            """
+            SELECT min(started_at), max(started_at) 
+            FROM raw_rides
+        """
+        ).result_rows[0]
+        logger.info(f"📅 Date range: {date_range[0]} to {date_range[1]}")
+
+        # Null checks
+        nulls = client.query(
+            """
+            SELECT 
+                countIf(ride_id = '') as empty_ride_id,
+                countIf(started_at = toDateTime('1970-01-01 00:00:00')) as empty_started,
+                countIf(start_station_id = '') as empty_start_station,
+                countIf(end_station_id = '') as empty_end_station
+            FROM raw_rides
+        """
+        ).result_rows[0]
+
+        logger.info(f"\n🔍 Data Quality Checks (Empty/Default Values):")
+        logger.info(f"  Empty ride_id: {nulls[0]:,}")
+        logger.info(f"  Default/Null started_at: {nulls[1]:,}")
+        logger.info(f"  Empty start_station: {nulls[2]:,}")
+        logger.info(f"  Empty end_station: {nulls[3]:,}")
+
+        # Files loaded
         files = client.query(
             """
             SELECT source_file, count(*) as cnt, min(loaded_at) as first_load
@@ -157,18 +203,21 @@ def validate_loaded_data(client):
         logger.info(f"\n📁 Files Loaded: {len(files)}")
         for file, cnt, first_load in files:
             logger.info(f"  {file}: {cnt:,} rows (loaded: {first_load})")
-    except:
-        logger.info(f"\n📁 Source file tracking not available")
+
+    except Exception as e:
+        logger.error(f"Error during validation: {e}")
 
     logger.info("=" * 60 + "\n")
 
 
 @retry(max_attempts=3, delay=5)
-def load_csv_to_clickhouse(csv_path, batch_size=10000, skip_duplicates=True):
+def load_csv_to_clickhouse(
+    csv_path, target="dev", batch_size=10000, skip_duplicates=True
+):
     """Load CSV file to ClickHouse in batches."""
     logger.info(f"Loading data from {csv_path}")
 
-    client = get_clickhouse_client()
+    client = get_clickhouse_client(target)
     filename = Path(csv_path).name
 
     # Check if already loaded
@@ -202,7 +251,12 @@ def load_csv_to_clickhouse(csv_path, batch_size=10000, skip_duplicates=True):
                     continue
 
                 # Insert into ClickHouse
-                client.insert_df(table="raw_rides", df=chunk_clean)
+                try:
+                    client.insert_df(table="raw_rides", df=chunk_clean)
+                except Exception as e:
+                    # Retry logic handles connection issues, but if table doesn't exist, create it?
+                    # The check_file_already_loaded handles creation now.
+                    raise e
 
                 total_rows += len(chunk_clean)
                 pbar.update(len(chunk))
@@ -215,7 +269,7 @@ def load_csv_to_clickhouse(csv_path, batch_size=10000, skip_duplicates=True):
         raise
 
 
-def load_directory(data_dir, pattern="*.csv"):
+def load_directory(data_dir, target="dev", pattern="*.csv"):
     """Load all CSV files from a directory."""
     data_path = Path(data_dir)
 
@@ -229,14 +283,14 @@ def load_directory(data_dir, pattern="*.csv"):
         logger.warning(f"No CSV files found in {data_dir}")
         return 0
 
-    logger.info(f"Found {len(csv_files)} CSV files to load")
+    logger.info(f"Found {len(csv_files)} CSV files to load into {target}")
 
     total_loaded = 0
     failed_files = []
 
     for csv_file in csv_files:
         try:
-            rows = load_csv_to_clickhouse(csv_file)
+            rows = load_csv_to_clickhouse(csv_file, target=target)
             total_loaded += rows
         except Exception as e:
             logger.error(f"Failed to load {csv_file}: {e}")
@@ -252,7 +306,7 @@ def load_directory(data_dir, pattern="*.csv"):
     return total_loaded
 
 
-def download_and_load(limit=None, data_dir="./data/raw"):
+def download_and_load(limit=None, data_dir="./data/raw", target="dev"):
     """Download data from S3 and load to ClickHouse."""
     logger.info("Starting download from S3...")
 
@@ -263,12 +317,14 @@ def download_and_load(limit=None, data_dir="./data/raw"):
         logger.error("No files downloaded")
         return 0
 
-    logger.info(f"Downloaded {len(csv_files)} files, now loading to ClickHouse...")
+    logger.info(
+        f"Downloaded {len(csv_files)} files, now loading to ClickHouse ({target})..."
+    )
 
     total_loaded = 0
     for csv_file in csv_files:
         try:
-            rows = load_csv_to_clickhouse(csv_file)
+            rows = load_csv_to_clickhouse(csv_file, target=target)
             total_loaded += rows
         except Exception as e:
             logger.error(f"Failed to load {csv_file}: {e}")
@@ -293,27 +349,34 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch-size", type=int, default=10000, help="Batch size for inserts"
     )
+    # Added target argument
+    parser.add_argument(
+        "--target",
+        type=str,
+        default="dev",
+        choices=["dev", "cloud"],
+        help="Target environment: 'dev' (local) or 'cloud'",
+    )
 
     args = parser.parse_args()
 
     try:
         if args.download:
-            total = download_and_load(limit=args.limit, data_dir=args.dir)
-            logger.info(f"Pipeline complete. Total rows loaded: {total:,}")
-
-            # Add validation report
-            if total > 0:
-                client = get_clickhouse_client()
-                validate_loaded_data(client)
-
+            total = download_and_load(
+                limit=args.limit, data_dir=args.dir, target=args.target
+            )
         elif args.file:
-            total = load_csv_to_clickhouse(args.file, args.batch_size)
-            client = get_clickhouse_client()
-            validate_loaded_data(client)
+            total = load_csv_to_clickhouse(
+                args.file, target=args.target, batch_size=args.batch_size
+            )
         else:
-            total = load_directory(args.dir)
-            client = get_clickhouse_client()
+            total = load_directory(args.dir, target=args.target)
+
+        # Validation
+        if total >= 0:  # Check even if 0 to show empty state
+            client = get_clickhouse_client(target=args.target)
             validate_loaded_data(client)
+
     except KeyboardInterrupt:
         logger.info("\n⚠️  Process interrupted by user")
         sys.exit(1)

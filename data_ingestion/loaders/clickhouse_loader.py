@@ -20,14 +20,32 @@ class ClickHouseLoader:
         user: str = None,
         password: str = None,
         database: str = None,
+        secure: bool = None,
     ):
-        """Initialize ClickHouse connection."""
-        self.host = host or os.getenv("CLICKHOUSE_HOST", "localhost")
-        self.port = port or int(os.getenv("CLICKHOUSE_PORT", "8123"))
-        self.user = user or os.getenv("CLICKHOUSE_USER", "default")
-        self.password = password or os.getenv("CLICKHOUSE_PASSWORD", "clickhouse")
-        self.database = database or os.getenv("CLICKHOUSE_DB", "bikeshare")
+        """
+        Initialize ClickHouse connection.
+        Defaults to CLICKHOUSE_CLOUD_* variables from .env
+        """
+        self.host = host or os.getenv("CLICKHOUSE_CLOUD_HOST")
+        self.port = port or int(os.getenv("CLICKHOUSE_CLOUD_HTTP_PORT", "8443"))
+        self.user = user or os.getenv("CLICKHOUSE_CLOUD_USER", "default")
+        self.password = password or os.getenv("CLICKHOUSE_CLOUD_PASSWORD")
+        self.database = database or os.getenv("CLICKHOUSE_CLOUD_DB", "default")
+
+        # Cloud is always secure (SSL)
+        if secure is not None:
+            self.secure = secure
+        else:
+            # Default to True for cloud, or check env var
+            self.secure = True
+
         self.client = None
+
+        # Safety check to prevent running against localhost when expecting cloud
+        if not self.host or "localhost" in self.host:
+            logger.warning(
+                "⚠️  Warning: Host appears to be local. Check your CLICKHOUSE_CLOUD_HOST variable."
+            )
 
     def connect(self):
         """Establish connection to ClickHouse."""
@@ -38,11 +56,18 @@ class ClickHouseLoader:
                 username=self.user,
                 password=self.password,
                 database=self.database,
+                secure=self.secure,
+                send_receive_timeout=300,
             )
-            logger.info("Connected to ClickHouse")
+
+            # Mask password in logs
+            masked_host = self.host[:15] + "..." if self.host else "None"
+            logger.info(
+                f"✅ Connected to ClickHouse Cloud at {masked_host}:{self.port}"
+            )
             return self.client
         except Exception as e:
-            logger.error(f"Failed to connect to ClickHouse: {e}")
+            logger.error(f"❌ Failed to connect to ClickHouse: {e}")
             raise
 
     def insert_dataframe(
@@ -56,9 +81,15 @@ class ClickHouseLoader:
 
         for i in range(0, len(df), batch_size):
             batch = df.iloc[i : i + batch_size]
-            self.client.insert_df(table=table, df=batch)
-            total_inserted += len(batch)
-            logger.info(f"Inserted {total_inserted}/{len(df)} rows")
+            try:
+                self.client.insert_df(table=table, df=batch, database=self.database)
+                total_inserted += len(batch)
+                logger.info(
+                    f"   ↳ Inserted batch: {len(batch)} rows (Total: {total_inserted})"
+                )
+            except Exception as e:
+                logger.error(f"   ↳ Error inserting batch at index {i}: {e}")
+                raise
 
         return total_inserted
 
