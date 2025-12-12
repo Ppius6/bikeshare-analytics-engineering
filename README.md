@@ -1,4 +1,4 @@
-# Bike Share Analytics Engineering Documentation
+# Bike Share Analytics Engineering
 
 ## Project Overview
 
