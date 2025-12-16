@@ -1,31 +1,45 @@
 {{
     config(
         materialized='table',
-        engine='MergeTree()'
+        engine='MergeTree()',
+        order_by=['station_id']
     )
 }}
 
-WITH station_stats AS (
+WITH combined_stats AS (
     SELECT
         start_station_id AS station_id,
-        count(*) AS total_starts,
-        countIf(member_casual = 'member') AS member_starts,
-        countIf(member_casual = 'casual') AS casual_starts,
-        avg(ride_duration_minutes) AS avg_ride_duration,
-        min(ride_date) AS first_ride_date,
-        max(ride_date) AS last_ride_date
+        'start' AS direction,
+        member_casual,
+        ride_duration_minutes,
+        ride_date
     FROM {{ ref('stg_rides') }}
     WHERE start_station_id IS NOT NULL
-    GROUP BY start_station_id
-),
-
-end_stats AS (
+    
+    UNION ALL
+    
     SELECT
         end_station_id AS station_id,
-        count(*) AS total_ends
+        'end' AS direction,
+        NULL AS member_casual,
+        NULL AS ride_duration_minutes,
+        NULL AS ride_date
     FROM {{ ref('stg_rides') }}
     WHERE end_station_id IS NOT NULL
-    GROUP BY end_station_id
+),
+
+station_aggregates AS (
+    SELECT
+        station_id,
+        countIf(direction = 'start') AS total_starts,
+        countIf(direction = 'end') AS total_ends,
+        countIf(direction = 'start' AND member_casual = 'member') AS member_starts,
+        countIf(direction = 'start' AND member_casual = 'casual') AS casual_starts,
+        avgIf(ride_duration_minutes, direction = 'start') AS avg_ride_duration,
+        minIf(ride_date, direction = 'start') AS first_ride_date,
+        maxIf(ride_date, direction = 'start') AS last_ride_date
+    FROM combined_stats
+    GROUP BY station_id
 )
 
 SELECT
@@ -33,15 +47,14 @@ SELECT
     s.station_name AS station_name,
     s.latitude AS latitude,
     s.longitude AS longitude,
-    coalesce(ss.total_starts, 0) AS total_rides_started,
-    coalesce(es.total_ends, 0) AS total_rides_ended,
-    coalesce(ss.total_starts, 0) + coalesce(es.total_ends, 0) AS total_rides,
-    coalesce(ss.member_starts, 0) AS member_rides_started,
-    coalesce(ss.casual_starts, 0) AS casual_rides_started,
-    round(ss.avg_ride_duration, 2) AS avg_ride_duration_minutes,
-    ss.first_ride_date,
-    ss.last_ride_date,
-    dateDiff('day', ss.first_ride_date, ss.last_ride_date) + 1 AS days_active
+    coalesce(sa.total_starts, 0) AS total_rides_started,
+    coalesce(sa.total_ends, 0) AS total_rides_ended,
+    coalesce(sa.total_starts, 0) + coalesce(sa.total_ends, 0) AS total_rides,
+    coalesce(sa.member_starts, 0) AS member_rides_started,
+    coalesce(sa.casual_starts, 0) AS casual_rides_started,
+    round(sa.avg_ride_duration, 2) AS avg_ride_duration_minutes,
+    sa.first_ride_date,
+    sa.last_ride_date,
+    dateDiff('day', sa.first_ride_date, sa.last_ride_date) + 1 AS days_active
 FROM {{ ref('stg_stations') }} s
-LEFT JOIN station_stats ss ON s.station_id = ss.station_id
-LEFT JOIN end_stats es ON s.station_id = es.station_id
+LEFT JOIN station_aggregates sa ON s.station_id = sa.station_id

@@ -1,7 +1,7 @@
 {{
     config(
         materialized='table',
-        order_by=['ride_date', 'started_at']
+        order_by=['ride_date', 'member_casual', 'rideable_type', 'started_at']
     )
 }}
 

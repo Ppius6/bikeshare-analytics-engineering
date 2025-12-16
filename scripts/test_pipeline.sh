@@ -51,21 +51,6 @@ for i in {1..60}; do
     sleep 1
 done
 
-# Check PostgreSQL health
-echo "Checking PostgreSQL..."
-for i in {1..30}; do
-    if docker compose exec -T postgres-dev pg_isready -U ${DEV_POSTGRES_USER:-postgres} > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ PostgreSQL is ready${NC}"
-        break
-    fi
-    if [ $i -eq 30 ]; then
-        echo -e "${RED}Error: PostgreSQL failed to start${NC}"
-        docker compose logs postgres-dev
-        exit 1
-    fi
-    sleep 2
-done
-
 # Verify ClickHouse database exists
 echo "Verifying ClickHouse database..."
 docker compose exec -T clickhouse clickhouse-client --query "SHOW DATABASES" | grep -q bikeshare && \

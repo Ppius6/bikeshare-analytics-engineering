@@ -23,10 +23,6 @@ dbt_project/target/
 dbt_project/dbt_packages/
 dbt_project/logs/
 
-# Dagster
-dagster_project/tmp/
-dagster_project/storage/
-
 # Data files
 data/raw/*
 data/processed/*

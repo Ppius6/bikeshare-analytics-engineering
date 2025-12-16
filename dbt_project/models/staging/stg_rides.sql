@@ -24,8 +24,7 @@ SELECT
     toYear(started_at) AS ride_year,
     loaded_at
 FROM {{ source('bikeshare', 'raw_rides') }}
-WHERE started_at < ended_at
-  AND dateDiff('minute', started_at, ended_at) >= 1
-  AND dateDiff('minute', started_at, ended_at) <= 1440
+PREWHERE started_at < ended_at
+  AND dateDiff('minute', started_at, ended_at) BETWEEN 1 AND 1440
 ORDER BY loaded_at DESC
 LIMIT 1 BY ride_id

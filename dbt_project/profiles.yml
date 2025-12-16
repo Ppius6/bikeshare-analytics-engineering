@@ -3,9 +3,11 @@ bikeshare:
   outputs:
     dev:
       type: clickhouse
+      driver: http
       schema: bikeshare
+      database: bikeshare
       host: "{{ env_var('CLICKHOUSE_HOST', 'clickhouse') }}"
-      port: "{{ env_var('CLICKHOUSE_PORT', '9000') | int }}"
+      port: "{{ env_var('CLICKHOUSE_HTTP_PORT', '8123') | int }}"
       user: "{{ env_var('CLICKHOUSE_USER', 'default') }}"
       password: "{{ env_var('CLICKHOUSE_PASSWORD', 'clickhouse') }}"
       secure: "{{ true if env_var('CLICKHOUSE_SECURE', 'false') == 'true' else false }}"
@@ -14,7 +16,9 @@ bikeshare:
 
     cloud:
       type: clickhouse
+      driver: native
       schema: bikeshare
+      database: bikeshare
       host: "{{ env_var('CLICKHOUSE_CLOUD_HOST') }}"
       port: "{{ env_var('CLICKHOUSE_CLOUD_NATIVE_PORT', '9440') | int }}"
       user: "{{ env_var('CLICKHOUSE_CLOUD_USER', 'default') }}"

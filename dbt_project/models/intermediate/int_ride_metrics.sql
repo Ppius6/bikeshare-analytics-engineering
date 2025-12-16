@@ -18,18 +18,16 @@ SELECT
     day_of_week,
     ride_month,
     ride_year,
-    
+    start_lat != 0 AND start_lng != 0 AND end_lat != 0 AND end_lng != 0 AS has_valid_coords,
     -- Distance calculation (Haversine formula approximation)
     CASE 
-        WHEN start_lat IS NOT NULL 
-         AND start_lng IS NOT NULL 
-         AND end_lat IS NOT NULL 
-         AND end_lng IS NOT NULL
+        WHEN start_lat != 0 AND start_lng != 0 
+         AND end_lat != 0 AND end_lng != 0
         THEN round(
             geoDistance(start_lng, start_lat, end_lng, end_lat) / 1000, 2
         )
         ELSE NULL
-    END AS distance_km,
+    END AS distance_km, 
     
     -- Time-based features
     CASE 
@@ -48,8 +46,7 @@ SELECT
     -- Speed calculation (km/h)
     CASE 
         WHEN ride_duration_minutes > 0 
-         AND start_lat IS NOT NULL 
-         AND end_lat IS NOT NULL
+         AND start_lat != 0 AND start_lng != 0 
         THEN round(
             (geoDistance(start_lng, start_lat, end_lng, end_lat) / 1000) / 
             (ride_duration_minutes / 60), 2

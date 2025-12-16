@@ -32,7 +32,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
 
 
@@ -60,35 +60,53 @@ def retry(max_attempts=3, delay=5):
     return decorator
 
 
+def ensure_table_exists(client):
+    """Create table if not exists by running init_clickhouse.sql"""
+    try:
+        # Get the path to init_clickhouse.sql
+        script_dir = Path(__file__).parent
+        init_sql_path = script_dir / "init_clickhouse.sql"
+
+        if not init_sql_path.exists():
+            logger.warning(f"init_clickhouse.sql not found at {init_sql_path}")
+            return False
+
+        # Read the SQL file
+        with open(init_sql_path, 'r') as f:
+            sql_content = f.read()
+
+        # Split into individual statements (by semicolon)
+        # Remove comments and empty lines
+        statements = []
+        for stmt in sql_content.split(';'):
+            # Remove SQL comments and whitespace
+            cleaned = '\n'.join(
+                line for line in stmt.split('\n')
+                if line.strip() and not line.strip().startswith('--')
+            )
+            if cleaned.strip():
+                statements.append(cleaned.strip())
+
+        # Execute each statement separately
+        for stmt in statements:
+            if stmt:
+                client.command(stmt)
+
+        logger.info("✓ Table schema initialized from init_clickhouse.sql")
+        return True
+    except Exception as e:
+        logger.warning(f"Could not initialize table schema: {e}")
+        return False
+
+
 def check_file_already_loaded(client, filename):
     """Check if file was already loaded."""
     try:
-        # Create table if not exists to avoid error on first run
-        client.command(
-            """
-            CREATE TABLE IF NOT EXISTS raw_rides (
-                ride_id String,
-                rideable_type String,
-                started_at DateTime,
-                ended_at DateTime,
-                start_station_name String,
-                start_station_id String,
-                end_station_name String,
-                end_station_id String,
-                start_lat Float64,
-                start_lng Float64,
-                end_lat Float64,
-                end_lng Float64,
-                member_casual String,
-                source_file String,
-                loaded_at DateTime
-            ) ENGINE = MergeTree()
-            ORDER BY (started_at, ride_id)
-        """
-        )
+        # Ensure table exists before checking
+        ensure_table_exists(client)
 
         result = client.query(
-            f"SELECT count(*) FROM raw_rides WHERE source_file = '{filename}'"
+            f"SELECT count(*) FROM bikeshare.raw_rides WHERE source_file = '{filename}'"
         ).result_rows
         return result[0][0] > 0
     except Exception as e:
@@ -100,33 +118,33 @@ def check_file_already_loaded(client, filename):
 def get_clickhouse_client(target: str = "dev"):
     """
     Create ClickHouse client connection based on target.
-    target: 'dev' (Local) or 'cloud' (ClickHouse Cloud)
+
+    Args:
+        target: 'dev' for local Docker, 'cloud' for ClickHouse Cloud
     """
     try:
         if target == "cloud":
+            # Use CLICKHOUSE_CLOUD_* variables
             host = os.getenv("CLICKHOUSE_CLOUD_HOST")
-            # Prefer HTTP port for Python client, fallback to standard 8443
             port = int(os.getenv("CLICKHOUSE_CLOUD_HTTP_PORT", "8443"))
             user = os.getenv("CLICKHOUSE_CLOUD_USER", "default")
-            password = os.getenv("CLICKHOUSE_CLOUD_PASSWORD")
+            password = os.getenv("CLICKHOUSE_CLOUD_PASSWORD", "")
             database = os.getenv("CLICKHOUSE_CLOUD_DB", "default")
-            secure = True
+            secure = os.getenv("CLICKHOUSE_CLOUD_SECURE", "true").lower() == "true"
             label = "ClickHouse Cloud ☁️"
         else:
+            # Use CLICKHOUSE_* variables for local
             host = os.getenv("CLICKHOUSE_HOST", "localhost")
-            # Check for specific HTTP port first, then generic PORT
-            port = int(
-                os.getenv("CLICKHOUSE_HTTP_PORT", os.getenv("CLICKHOUSE_PORT", "8123"))
-            )
+            port = int(os.getenv("CLICKHOUSE_HTTP_PORT", "8123"))
             user = os.getenv("CLICKHOUSE_USER", "default")
-            password = os.getenv("CLICKHOUSE_PASSWORD", "clickhouse")
+            password = os.getenv("CLICKHOUSE_PASSWORD", "")
             database = os.getenv("CLICKHOUSE_DB", "bikeshare")
             secure = os.getenv("CLICKHOUSE_SECURE", "false").lower() == "true"
             label = "ClickHouse Local 🏠"
 
         if not host:
             raise ValueError(
-                f"Host not found for target '{target}'. Check .env variables."
+                f"ClickHouse host not configured for target '{target}'. Check .env file."
             )
 
         client = clickhouse_connect.get_client(
@@ -136,7 +154,7 @@ def get_clickhouse_client(target: str = "dev"):
             password=password,
             database=database,
             secure=secure,
-            send_receive_timeout=300,  # Extended timeout for cloud operations
+            send_receive_timeout=300,
         )
 
         masked_host = host[:15] + "..." if len(host) > 15 else host
@@ -155,7 +173,7 @@ def validate_loaded_data(client):
 
     try:
         # Total records
-        total = client.query("SELECT count(*) FROM raw_rides").result_rows[0][0]
+        total = client.query("SELECT count(*) FROM bikeshare.raw_rides").result_rows[0][0]
         logger.info(f"📊 Total records: {total:,}")
 
         if total == 0:
@@ -165,8 +183,8 @@ def validate_loaded_data(client):
         # Date range
         date_range = client.query(
             """
-            SELECT min(started_at), max(started_at) 
-            FROM raw_rides
+            SELECT min(started_at), max(started_at)
+            FROM bikeshare.raw_rides
         """
         ).result_rows[0]
         logger.info(f"📅 Date range: {date_range[0]} to {date_range[1]}")
@@ -174,12 +192,12 @@ def validate_loaded_data(client):
         # Null checks
         nulls = client.query(
             """
-            SELECT 
+            SELECT
                 countIf(ride_id = '') as empty_ride_id,
                 countIf(started_at = toDateTime('1970-01-01 00:00:00')) as empty_started,
                 countIf(start_station_id = '') as empty_start_station,
                 countIf(end_station_id = '') as empty_end_station
-            FROM raw_rides
+            FROM bikeshare.raw_rides
         """
         ).result_rows[0]
 
@@ -193,7 +211,7 @@ def validate_loaded_data(client):
         files = client.query(
             """
             SELECT source_file, count(*) as cnt, min(loaded_at) as first_load
-            FROM raw_rides
+            FROM bikeshare.raw_rides
             WHERE source_file != ''
             GROUP BY source_file
             ORDER BY source_file
@@ -252,7 +270,7 @@ def load_csv_to_clickhouse(
 
                 # Insert into ClickHouse
                 try:
-                    client.insert_df(table="raw_rides", df=chunk_clean)
+                    client.insert_df(table="bikeshare.raw_rides", df=chunk_clean)
                 except Exception as e:
                     # Retry logic handles connection issues, but if table doesn't exist, create it?
                     # The check_file_already_loaded handles creation now.

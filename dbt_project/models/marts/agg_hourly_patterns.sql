@@ -1,7 +1,7 @@
 {{
     config(
         materialized='table',
-        order_by=['ride_hour', 'is_weekend']
+        order_by=['is_weekend', 'ride_hour']
     )
 }}
 

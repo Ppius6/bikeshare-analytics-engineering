@@ -47,20 +47,25 @@ Ideal for rapid testing, debugging, and offline work. Data stays inside the Dock
 ```bash
 # --- Option 1: Quick Start (Sample Data) ---
 # Download and load only 2 files from S3
-python /usr/app/scripts/load_to_clickhouse.py --download --limit 2
+python /usr/app/scripts/load_to_clickhouse.py --download --limit 2 --target dev
 
 # --- Option 2: Full Pipeline (All Data) ---
 # Load all CSV files currently in your local data directory
-python /usr/app/scripts/load_to_clickhouse.py --dir /usr/app/data/raw
+python /usr/app/scripts/load_to_clickhouse.py --dir /usr/app/data/raw --target dev
 
 # Run transformations locally
-dbt run
+dbt build --full-refresh
 
-# Test local data
-dbt test
+# Materialize performance projections (10-100x speedup on aggregations)
+exit  # Exit dbt-dev container
+docker-compose exec clickhouse clickhouse-client --password 'your_password' \
+  --query "ALTER TABLE bikeshare.raw_rides MATERIALIZE PROJECTION proj_member_analysis"
+docker-compose exec clickhouse clickhouse-client --password 'your_password' \
+  --query "ALTER TABLE bikeshare.raw_rides MATERIALIZE PROJECTION proj_hourly_station"
 
-# or combine altogether
-dbt build
+# Monitor performance (optional)
+docker-compose exec clickhouse clickhouse-client --password 'your_password' \
+  --multiquery < scripts/monitor_clickhouse.sql
 ```
 
 #### Option B: ClickHouse Cloud (Production-Ready)
@@ -68,22 +73,45 @@ dbt build
 Pushes data to your managed ClickHouse Cloud instance. Requires `CLICKHOUSE_CLOUD_*` variables in `.env`.
 
 ```bash
-# --- Option 1: Cloud Test (Sample Data) ---
-# Download and load only 2 files to Cloud
+# --- Inside dbt-dev container ---
+# Option 1: Cloud Test (Sample Data)
 python /usr/app/scripts/load_to_clickhouse.py --download --limit 2 --target cloud
 
-# --- Option 2: Production Load (Full Data) ---
-# Load all local CSV files to Cloud
+# Option 2: Production Load (Full Data)
 python /usr/app/scripts/load_to_clickhouse.py --dir /usr/app/data/raw --target cloud
 
 # Run transformations against Cloud
-dbt run --target cloud
+dbt build --full-refresh --target cloud
 
-# Test Cloud data
-dbt test --target cloud
+# --- Exit container for ClickHouse operations ---
+exit
 
-# Or combine altogether
-dbt build --target cloud
+# --- From host machine ---
+# Add projections to cloud (run once after initial setup)
+docker-compose exec clickhouse clickhouse-client \
+  --host your-id.region.aws.clickhouse.cloud \
+  --port 9440 --secure \
+  --user default --password 'your_cloud_password' \
+  --query "ALTER TABLE bikeshare.raw_rides ADD PROJECTION IF NOT EXISTS proj_member_analysis (SELECT member_casual, rideable_type, toDate(started_at) AS ride_date, count() AS total_rides, avg(dateDiff('minute', started_at, ended_at)) AS avg_duration GROUP BY member_casual, rideable_type, ride_date)"
+
+docker-compose exec clickhouse clickhouse-client \
+  --host your-id.region.aws.clickhouse.cloud \
+  --port 9440 --secure \
+  --user default --password 'your_cloud_password' \
+  --query "ALTER TABLE bikeshare.raw_rides ADD PROJECTION IF NOT EXISTS proj_hourly_station (SELECT start_station_id, toHour(started_at) AS hour, toDayOfWeek(started_at) IN (6, 7) AS is_weekend, count() AS ride_count GROUP BY start_station_id, hour, is_weekend)"
+
+# Materialize projections (this processes existing data - takes a few minutes)
+docker-compose exec clickhouse clickhouse-client \
+  --host your-id.region.aws.clickhouse.cloud \
+  --port 9440 --secure \
+  --user default --password 'your_cloud_password' \
+  --query "ALTER TABLE bikeshare.raw_rides MATERIALIZE PROJECTION proj_member_analysis"
+
+docker-compose exec clickhouse clickhouse-client \
+  --host your-id.region.aws.clickhouse.cloud \
+  --port 9440 --secure \
+  --user default --password 'your_cloud_password' \
+  --query "ALTER TABLE bikeshare.raw_rides MATERIALIZE PROJECTION proj_hourly_station"
 ```
 
 ## Configuration (.env)
@@ -112,6 +140,7 @@ CLICKHOUSE_CLOUD_USER=default
 ├── data/                    # Local data storage (ignored by git)
 ├── data_ingestion/          # Python ETL code
 │   ├── extractors/          # S3 downloader logic
+│   ├── loaders/             # Database loaders
 │   └── utils/               # Data cleaning & validation
 ├── dbt_project/             # dbt transformations
 │   ├── models/
@@ -120,7 +149,10 @@ CLICKHOUSE_CLOUD_USER=default
 │   │   └── marts/           # Table materializations (business BI layers)
 │   ├── tests/               # Data quality tests
 │   └── profiles.yml         # Connection profiles (dev/cloud)
-├── docker/                  # Docker configurations
-├── scripts/                 # Entry point scripts (load_to_clickhouse.py)
+├── scripts/                 # Entry point scripts and SQL initialization
+│   ├── load_to_clickhouse.py
+│   ├── init_clickhouse.sql
+│   ├── monitor_clickhouse.sql
+│   └── test_pipeline.sh
 └── docs/                    # Documentation
 ```

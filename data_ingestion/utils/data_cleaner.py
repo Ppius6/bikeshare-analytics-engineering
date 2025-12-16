@@ -1,8 +1,6 @@
 """Data cleaning utilities for bike share data."""
 
 import logging
-from datetime import datetime
-from typing import Optional
 
 import pandas as pd
 

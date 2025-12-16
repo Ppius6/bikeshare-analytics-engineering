@@ -1,7 +1,9 @@
 {{
     config(
-        materialized='table',
-        order_by=['ride_date']
+        materialized='incremental',
+        unique_key='ride_date',
+        order_by=['ride_date'],
+        incremental_strategy='delete+insert'
     )
 }}
 
@@ -40,6 +42,11 @@ SELECT
     countIf(time_of_day = 'Night') AS night_rides
 
 FROM {{ ref('fct_rides') }}
+
+{% if is_incremental() %} 
+WHERE ride_date NOT IN (SELECT max(ride_date) FROM {{ this }})
+{% endif %}
+
 GROUP BY 
     ride_date,
     day_of_week,
